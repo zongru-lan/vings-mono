@@ -13,7 +13,7 @@ from gaussian.general_utils import inverse_sigmoid
 from abc import ABCMeta, abstractmethod
 from gaussian.loss_utils import get_loss, get_pixel_mask, l1_loss
 from gaussian.normal_utils import depth_propagate_normal
-from gaussian.vis_utils import vis_rgbdnua, load_ply, calc_psnr
+from gaussian.vis_utils import vis_rgbdnua, load_ply, calc_psnr, save_keyframe_pose_record
 # from utils.gtsam_utils import matrix_to_tq
 import copy
 import time
@@ -382,13 +382,26 @@ class GaussianBase:
         depths = batch['depths']
         depths_cov = batch['depths_cov']
         intrinsic_dict = batch['intrinsic']
+        output_cfg = self.cfg.get('output', {})
+        save_online_render = output_cfg.get('save_online_renders')
+        if save_online_render is None:
+            save_online_render = not output_cfg.get('final_rerender', False)
+        save_rgbdnua = output_cfg.get('save_rgbdnua', True)
+        pose_only_output = (not save_online_render) and (not save_rgbdnua)
 
         for kf_idx in range(poses.shape[0]):
+            c2w = poses[kf_idx]
+            frame_id = batch['viz_out_idx_to_f_idx'][kf_idx]
+            frame_meta = self._keyframe_meta(batch, kf_idx)
+
+            if pose_only_output:
+                save_keyframe_pose_record(self.cfg, c2w, frame_meta, frame_id)
+                continue
+
             save_key = self._keyframe_save_key(batch, kf_idx)
             if save_key in self.saved_output_frames:
                 continue
 
-            c2w = poses[kf_idx]
             w2c = torch.linalg.inv(c2w)
             next_idx = min(kf_idx + 1, poses.shape[0] - 1)
             with torch.no_grad():
@@ -406,7 +419,7 @@ class GaussianBase:
                     'c2w': c2w,
                     'pose': c2w,
                     'abs_frame_idx_list': batch['viz_out_idx_to_f_idx'],
-                    'frame_meta': self._keyframe_meta(batch, kf_idx),
+                    'frame_meta': frame_meta,
                 }
 
                 if self.cfg['use_sky'] and 'sky_images' in batch:
@@ -414,7 +427,6 @@ class GaussianBase:
                     pred_dict_sky = self.sky_model.render(w2c, intrinsic_dict)
                     pred_dict['rgb'] = self.sky_model.fuse_rgb(pred_dict, pred_dict_sky)
 
-                frame_id = batch['viz_out_idx_to_f_idx'][kf_idx]
                 vis_rgbdnua(self.cfg, frame_id, pred_dict, gt_dict)
 
             self.saved_output_frames.add(save_key)

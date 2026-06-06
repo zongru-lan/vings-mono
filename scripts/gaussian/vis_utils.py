@@ -255,36 +255,65 @@ def _save_keyframe_pose(cfg, c2w, frame_meta, frame_id, render_name):
     matrix_values = c2w_np.reshape(-1).tolist()
 
     csv_path = os.path.join(pose_dir, 'estimated_c2w.csv')
-    write_header = not os.path.exists(csv_path)
     matrix_header = [f'm{r}{c}' for r in range(4) for c in range(4)]
-    with open(csv_path, 'a', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        if write_header:
-            writer.writerow([
-                'gt_frame_index', 'gt_frame_id', 'gt_image_name', 'gt_image_path',
-                'render_name', 'pose_file', 'gt_timestamp', 'coordinate_system',
-                'tx', 'ty', 'tz', 'qx', 'qy', 'qz', 'qw',
-                *matrix_header,
-            ])
-        writer.writerow([
-            gt_frame_index, gt_frame_id, gt_image_name, gt_image_path,
-            render_name, pose_name, gt_timestamp, POSE_COORDINATE_SYSTEM,
-            *[f'{x:.10f}' for x in translation],
-            f'{qx:.10f}', f'{qy:.10f}', f'{qz:.10f}', f'{qw:.10f}',
-            *[f'{x:.10f}' for x in matrix_values],
-        ])
+    header = [
+        'gt_frame_index', 'gt_frame_id', 'gt_image_name', 'gt_image_path',
+        'render_name', 'pose_file', 'gt_timestamp', 'coordinate_system',
+        'tx', 'ty', 'tz', 'qx', 'qy', 'qz', 'qw',
+        *matrix_header,
+    ]
+    row = dict(zip(header, [
+        gt_frame_index, gt_frame_id, gt_image_name, gt_image_path,
+        render_name, pose_name, gt_timestamp, POSE_COORDINATE_SYSTEM,
+        *[f'{x:.10f}' for x in translation],
+        f'{qx:.10f}', f'{qy:.10f}', f'{qz:.10f}', f'{qw:.10f}',
+        *[f'{x:.10f}' for x in matrix_values],
+    ]))
 
-    try:
-        timestamp_float = float(gt_timestamp)
-    except (TypeError, ValueError):
-        timestamp_float = None
-    if timestamp_float is not None:
-        tum_path = os.path.join(pose_dir, 'estimated_c2w_tum.txt')
-        with open(tum_path, 'a', encoding='utf-8') as f:
+    rows = []
+    if os.path.exists(csv_path):
+        with open(csv_path, newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for existing_row in reader:
+                if existing_row.get('pose_file') == pose_name:
+                    continue
+                rows.append(existing_row)
+    rows.append(row)
+
+    def _pose_row_sort_key(item):
+        try:
+            return (0, float(item.get('gt_timestamp', '')))
+        except (TypeError, ValueError):
+            return (1, str(item.get('gt_frame_id', item.get('pose_file', ''))))
+
+    rows = sorted(rows, key=_pose_row_sort_key)
+    with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=header)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    tum_path = os.path.join(pose_dir, 'estimated_c2w_tum.txt')
+    with open(tum_path, 'w', encoding='utf-8') as f:
+        for pose_row in rows:
+            try:
+                timestamp_float = float(pose_row['gt_timestamp'])
+                tx, ty, tz = float(pose_row['tx']), float(pose_row['ty']), float(pose_row['tz'])
+                qx, qy, qz, qw = (
+                    float(pose_row['qx']), float(pose_row['qy']),
+                    float(pose_row['qz']), float(pose_row['qw'])
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
             f.write(
-                f'{timestamp_float:.9f} {translation[0]:.10f} {translation[1]:.10f} {translation[2]:.10f} '
+                f'{timestamp_float:.9f} {tx:.10f} {ty:.10f} {tz:.10f} '
                 f'{qx:.10f} {qy:.10f} {qz:.10f} {qw:.10f}\n'
             )
+
+
+def save_keyframe_pose_record(cfg, c2w, frame_meta, frame_id, render_name=None):
+    if render_name is None:
+        render_name = get_keyframe_render_name(cfg, frame_meta, frame_id)
+    _save_keyframe_pose(cfg, c2w, frame_meta, frame_id, render_name)
 
 
 def _save_keyframe_outputs(cfg, frame_id, pred_rgb_chw, c2w, frame_meta):

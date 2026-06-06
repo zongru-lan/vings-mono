@@ -182,6 +182,8 @@ Use `gt_timestamp` to match the corresponding row in:
 
 `gt_frame_index`, `gt_frame_id`, and `gt_image_name` are also saved for manual checking and debugging.
 
+In the clean railway mode, pose records are rewritten/upserted by `pose_file` as keyframe poses are updated during mapping. The final CSV/TUM files therefore store the latest saved pose for each keyframe before final-map rerendering and ATE evaluation.
+
 ## 6. TUM-Style Trajectory
 
 A TUM-style trajectory is also saved:
