@@ -6,6 +6,7 @@ import os
 from frontend.dbaf import DBAFusion
 from gaussian.gaussian_model import GaussianModel
 from gaussian.vis_utils import save_ply, vis_map, vis_bev
+from gaussian.final_eval import finalize_sequence_outputs
 import argparse
 parser = argparse.ArgumentParser(description="Add config path.")
 parser.add_argument("config")
@@ -150,6 +151,7 @@ class Runner:
             # if ((idx+1) % 100 == 0 or (idx == len(self.dataset) - 1)) and self.mapper._xyz.shape[0] > 0:
                 save_ply(self.mapper, idx, save_mode='2dgs')
                 # save_ply(self.mapper, idx, save_mode='pth')
+                finalize_sequence_outputs(self.cfg, self.mapper)
             
 
 if __name__ == '__main__':

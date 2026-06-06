@@ -116,6 +116,23 @@ cleanup_on_signal() {
 trap 'cleanup_on_signal SIGINT' INT
 trap 'cleanup_on_signal SIGTERM' TERM
 
+check_python_dependencies() {
+  "$PYTHON_BIN" - <<'PY'
+import importlib.util
+import sys
+
+required = ['lpips', 'skimage', 'pandas', 'cv2', 'torchvision']
+missing = [name for name in required if importlib.util.find_spec(name) is None]
+if importlib.util.find_spec('pyarrow') is None and importlib.util.find_spec('fastparquet') is None:
+    missing.append('pyarrow or fastparquet')
+
+if missing:
+    print('Missing Python dependencies for final rendering/metrics: ' + ', '.join(missing), file=sys.stderr)
+    print('Install project requirements and add a parquet engine, e.g. pip install pyarrow.', file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 stop_gpu_reserver() {
   if [[ "$STOP_RESERVER" -ne 1 ]]; then
     log_msg "Keeping gpu_reserver process if it exists."
@@ -179,8 +196,15 @@ cfg['dataset']['root'] = str(Path(data_root) / sequence) + '/'
 cfg.setdefault('output', {})['save_dir'] = '/home/leizongru/lzr_ws/VINGS-Mono/output/'
 cfg['output']['save_rgbdnua'] = False
 cfg['output']['save_legacy_outputs'] = False
+cfg['output']['final_rerender'] = True
+cfg['output']['save_online_renders'] = False
+cfg['output']['eval_render_metrics'] = True
+cfg['output']['eval_ate'] = True
 cfg['output']['render_height'] = 2504
 cfg['output']['render_width'] = 4112
+cfg['output']['lpips_eval_width'] = 1024
+cfg['output']['lpips_net'] = 'alex'
+cfg['output']['ate_timestamp_tolerance_sec'] = 0.05
 
 with open(output_path, 'w', encoding='utf-8') as f:
     yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
@@ -285,6 +309,12 @@ fi
 if [[ ! -f "$GTSAM_LIB_DIR/libgtsam.so.4" ]]; then
   log_msg "GTSAM shared library not found: $GTSAM_LIB_DIR/libgtsam.so.4"
   exit 2
+fi
+if [[ "$DRY_RUN" -ne 1 ]]; then
+  check_python_dependencies || {
+    log_msg "Python dependency check failed."
+    exit 2
+  }
 fi
 export LD_LIBRARY_PATH="$GTSAM_LIB_DIR:${LD_LIBRARY_PATH:-}"
 for seq in "${SEQUENCES[@]}"; do

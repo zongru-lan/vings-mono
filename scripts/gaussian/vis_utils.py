@@ -195,14 +195,12 @@ Render images are saved in `../renders/` with the same `frame_id` stem.
         f.write(content)
 
 
-def _save_keyframe_render(cfg, pred_rgb_chw, frame_meta, frame_id):
-    render_dir = os.path.join(cfg['output']['save_dir'], 'renders')
-    os.makedirs(render_dir, exist_ok=True)
-
+def get_keyframe_render_name(cfg, frame_meta, frame_id):
     fallback_name = f"FrameId={str(_safe_scalar(frame_id)).zfill(5)}.png"
-    render_name = os.path.basename(str(_frame_meta_value(frame_meta, 'render_name', fallback_name)))
-    render_path = os.path.join(render_dir, render_name)
+    return os.path.basename(str(_frame_meta_value(frame_meta, 'render_name', fallback_name)))
 
+
+def prepare_keyframe_render_image(cfg, pred_rgb_chw):
     output_cfg = cfg.get('output', {})
     target_h = int(output_cfg.get('render_height', cfg['intrinsic']['H']))
     target_w = int(output_cfg.get('render_width', cfg['intrinsic']['W']))
@@ -215,8 +213,23 @@ def _save_keyframe_render(cfg, pred_rgb_chw, frame_meta, frame_id):
             mode='bilinear',
             align_corners=False,
         ).squeeze(0)
+    return image
+
+
+def save_keyframe_render_image(cfg, pred_rgb_chw, frame_meta, frame_id):
+    render_dir = os.path.join(cfg['output']['save_dir'], 'renders')
+    os.makedirs(render_dir, exist_ok=True)
+
+    render_name = get_keyframe_render_name(cfg, frame_meta, frame_id)
+    render_path = os.path.join(render_dir, render_name)
+
+    image = prepare_keyframe_render_image(cfg, pred_rgb_chw)
     torchvision.utils.save_image(image, render_path)
     return render_name
+
+
+def _save_keyframe_render(cfg, pred_rgb_chw, frame_meta, frame_id):
+    return save_keyframe_render_image(cfg, pred_rgb_chw, frame_meta, frame_id)
 
 
 def _save_keyframe_pose(cfg, c2w, frame_meta, frame_id, render_name):
@@ -275,7 +288,15 @@ def _save_keyframe_pose(cfg, c2w, frame_meta, frame_id, render_name):
 
 
 def _save_keyframe_outputs(cfg, frame_id, pred_rgb_chw, c2w, frame_meta):
-    render_name = _save_keyframe_render(cfg, pred_rgb_chw, frame_meta, frame_id)
+    output_cfg = cfg.get('output', {})
+    save_online_render = output_cfg.get('save_online_renders')
+    if save_online_render is None:
+        save_online_render = not output_cfg.get('final_rerender', False)
+
+    if save_online_render:
+        render_name = _save_keyframe_render(cfg, pred_rgb_chw, frame_meta, frame_id)
+    else:
+        render_name = get_keyframe_render_name(cfg, frame_meta, frame_id)
     _save_keyframe_pose(cfg, c2w, frame_meta, frame_id, render_name)
 
 

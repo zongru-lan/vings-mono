@@ -1,7 +1,6 @@
 __pycache__/
 .vscode/
 build_gtsam/*
-# submodules/*  # Commented out to allow submodules
 ckpts/*
 output/*
 logs/
@@ -12,3 +11,5 @@ logs/
 /DROID-SLAM/
 /gtsam/
 /lietorch/
+.gitmodules
+/submodules/

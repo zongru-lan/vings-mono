@@ -25,8 +25,15 @@ output:
   save_dir: /home/leizongru/lzr_ws/VINGS-Mono/output/
   save_rgbdnua: False
   save_legacy_outputs: False
+  final_rerender: True
+  save_online_renders: False
+  eval_render_metrics: True
+  eval_ate: True
   render_height: 2504
   render_width: 4112
+  lpips_eval_width: 1024
+  lpips_net: alex
+  ate_timestamp_tolerance_sec: 0.05
 
 # rgb_12mp_middle calibration from /home/leizongru/lzr_ws/intrinsics_rgb_12mp_middle.json.
 # Source OpenCV distortion coefficients [k1, k2, p1, p2, k3]:
