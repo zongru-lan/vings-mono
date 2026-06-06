@@ -8,7 +8,7 @@ PYTHON_BIN="/home/leizongru/miniconda3/envs/vings_vio/bin/python"
 LOG_ROOT="$ROOT_DIR/logs"
 RESERVER_PID_FILE="/home/leizongru/lzr_ws/gpu_reserver/hold_gpus.pid"
 GTSAM_LIB_DIR="$ROOT_DIR/gtsam/build/gtsam"
-GPU_CSV="2,3"
+GPU_CSV="2"
 STOP_RESERVER=1
 DRY_RUN=0
 
@@ -29,7 +29,7 @@ Usage: $0 [options]
 Run the seven railway VO sequences with a two-GPU dynamic queue.
 
 Options:
-  --gpus 2,3          Physical GPU ids to use. Default: 2,3
+  --gpus 2            Physical GPU ids to use. Default: 2
   --keep-reserver     Do not stop /home/leizongru/lzr_ws/gpu_reserver before running.
   --config PATH       Base railway config. Default: $BASE_CONFIG
   --python PATH       Python executable. Default: $PYTHON_BIN
