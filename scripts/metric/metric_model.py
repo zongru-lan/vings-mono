@@ -1,11 +1,12 @@
 import torch
 import cv2
 import numpy as np
+import os
 import sys
-sys.path.append('/data/wuke/workspace/VINGS-Mono/submodules/')
+repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.append(os.path.join(repo_root, 'submodules'))
 from metric_modules import Metric
 # from metric.metric3d import Metric3D_Model
-
 class Metric_Model:
     def __init__(self, cfg, u_scale=None, v_scale=None):
         self.cfg = cfg

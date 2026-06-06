@@ -4,3 +4,10 @@ build_gtsam/*
 # submodules/*  # Commented out to allow submodules
 ckpts/*
 output/*
+
+# Local datasets and external checkouts
+/data/
+/rail_dataset/
+/DROID-SLAM/
+/gtsam/
+/lietorch/
