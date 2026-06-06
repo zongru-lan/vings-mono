@@ -7,6 +7,7 @@ BASE_CONFIG="$ROOT_DIR/configs/railway.yaml"
 PYTHON_BIN="/home/leizongru/miniconda3/envs/vings_vio/bin/python"
 LOG_ROOT="$ROOT_DIR/logs"
 RESERVER_PID_FILE="/home/leizongru/lzr_ws/gpu_reserver/hold_gpus.pid"
+GTSAM_LIB_DIR="$ROOT_DIR/gtsam/build/gtsam"
 GPU_CSV="2,3"
 STOP_RESERVER=1
 DRY_RUN=0
@@ -269,6 +270,7 @@ worker() {
 log_msg "Run directory: $RUN_DIR"
 log_msg "Base config: $BASE_CONFIG"
 log_msg "Python: $PYTHON_BIN"
+log_msg "GTSAM lib dir: $GTSAM_LIB_DIR"
 log_msg "GPUs: ${GPUS[*]}"
 log_msg "Sequences: ${SEQUENCES[*]}"
 
@@ -280,6 +282,11 @@ if [[ ! -f "$BASE_CONFIG" ]]; then
   log_msg "Base config not found: $BASE_CONFIG"
   exit 2
 fi
+if [[ ! -f "$GTSAM_LIB_DIR/libgtsam.so.4" ]]; then
+  log_msg "GTSAM shared library not found: $GTSAM_LIB_DIR/libgtsam.so.4"
+  exit 2
+fi
+export LD_LIBRARY_PATH="$GTSAM_LIB_DIR:${LD_LIBRARY_PATH:-}"
 for seq in "${SEQUENCES[@]}"; do
   if [[ ! -d "$DATA_ROOT/$seq" ]]; then
     log_msg "Dataset sequence directory not found: $DATA_ROOT/$seq"
