@@ -4,6 +4,7 @@ build_gtsam/*
 # submodules/*  # Commented out to allow submodules
 ckpts/*
 output/*
+logs/
 
 # Local datasets and external checkouts
 /data/

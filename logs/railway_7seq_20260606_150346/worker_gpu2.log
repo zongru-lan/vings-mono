@@ -1,8 +1,0 @@
-[2026-06-06 15:03:46] Worker for GPU 2 is ready.
-[2026-06-06 15:03:46] START seq=scene_11_train gpu=2 output=/home/leizongru/lzr_ws/VINGS-Mono/output/scene_11_train log=/home/leizongru/lzr_ws/VINGS-Mono/logs/railway_7seq_20260606_150346/scene_11_train_gpu2.log
-[2026-06-06 15:03:48] FAIL  seq=scene_11_train gpu=2 status=1 log=/home/leizongru/lzr_ws/VINGS-Mono/logs/railway_7seq_20260606_150346/scene_11_train_gpu2.log
-[2026-06-06 15:03:48] START seq=scene_14_train gpu=2 output=/home/leizongru/lzr_ws/VINGS-Mono/output/scene_14_train log=/home/leizongru/lzr_ws/VINGS-Mono/logs/railway_7seq_20260606_150346/scene_14_train_gpu2.log
-[2026-06-06 15:03:50] FAIL  seq=scene_14_train gpu=2 status=1 log=/home/leizongru/lzr_ws/VINGS-Mono/logs/railway_7seq_20260606_150346/scene_14_train_gpu2.log
-[2026-06-06 15:03:50] START seq=scene_17_train gpu=2 output=/home/leizongru/lzr_ws/VINGS-Mono/output/scene_17_train log=/home/leizongru/lzr_ws/VINGS-Mono/logs/railway_7seq_20260606_150346/scene_17_train_gpu2.log
-[2026-06-06 15:03:52] FAIL  seq=scene_17_train gpu=2 status=1 log=/home/leizongru/lzr_ws/VINGS-Mono/logs/railway_7seq_20260606_150346/scene_17_train_gpu2.log
-[2026-06-06 15:03:52] Worker for GPU 2 finished with 3 failure(s).
