@@ -10,8 +10,9 @@ from tqdm import tqdm
 
 '''
 datadir|
-       ├── rgb
-              ├── *.png / *.jpg / *.jpeg / *.bmp
+       ├── *.png / *.jpg / *.jpeg / *.bmp
+       └── rgb
+              └── *.png / *.jpg / *.jpeg / *.bmp
 
 '''
 
@@ -49,25 +50,69 @@ class CustomDataset:
         all_imu[:, 0] = np.array(self.rgbinfo_dict['timestamp'])
         return all_imu
     
+    def _timestamp_from_filename(self, filepath, fallback):
+        name = os.path.splitext(os.path.basename(filepath))[0]
+        if '_' in name:
+            maybe_timestamp = name.rsplit('_', 1)[-1]
+            try:
+                return float(maybe_timestamp)
+            except ValueError:
+                pass
+        return float(fallback)
+
+    def _frame_id_from_filename(self, filepath):
+        stem = os.path.splitext(os.path.basename(filepath))[0]
+        return stem.split('_', 1)[0]
+
+    def _to_numpy_timestamps(self, timestamps):
+        if torch.is_tensor(timestamps):
+            return timestamps.detach().cpu().numpy().reshape(-1).astype(np.float64)
+        return np.asarray(timestamps, dtype=np.float64).reshape(-1)
+
+    def get_frame_metadata_by_timestamps(self, timestamps):
+        query_timestamps = self._to_numpy_timestamps(timestamps)
+        source_timestamps = self._timestamp_array
+        matched_indices = []
+        for timestamp in query_timestamps:
+            matched_indices.append(int(np.argmin(np.abs(source_timestamps - timestamp))))
+
+        return {
+            'frame_indices': matched_indices,
+            'frame_ids': [self.rgbinfo_dict['frame_id'][idx] for idx in matched_indices],
+            'image_names': [self.rgbinfo_dict['image_name'][idx] for idx in matched_indices],
+            'image_stems': [self.rgbinfo_dict['image_stem'][idx] for idx in matched_indices],
+            'image_paths': [self.rgbinfo_dict['filepath'][idx] for idx in matched_indices],
+            'render_names': [f"{self.rgbinfo_dict['frame_id'][idx]}.png" for idx in matched_indices],
+            'pose_names': [f"{self.rgbinfo_dict['frame_id'][idx]}.txt" for idx in matched_indices],
+            'matched_timestamps': [self.rgbinfo_dict['timestamp'][idx] for idx in matched_indices],
+        }
+
     def preload_rgbinfo(self):
         '''
-        We don't need timestamp in vo setup, we set 1s perframe.
+        Prefer timestamps encoded in filenames like 000_1638358313.099999905.png.
+        Fall back to 1s-per-frame indices for generic custom image folders.
         '''
-        rgb_dir = os.path.join(self.dataset_dir, 'rgb')
         patterns = ['*.png', '*.jpg', '*.jpeg', '*.bmp']
+        image_dirs = [self.dataset_dir, os.path.join(self.dataset_dir, 'rgb')]
         rgb_files = []
-        for pattern in patterns:
-            rgb_files.extend(glob.glob(os.path.join(rgb_dir, pattern)))
-            rgb_files.extend(glob.glob(os.path.join(rgb_dir, pattern.upper())))
+        for image_dir in image_dirs:
+            for pattern in patterns:
+                rgb_files.extend(glob.glob(os.path.join(image_dir, pattern)))
+                rgb_files.extend(glob.glob(os.path.join(image_dir, pattern.upper())))
         rgb_files = sorted(set(rgb_files))
 
         if len(rgb_files) == 0:
-            raise FileNotFoundError(f"No images found in {rgb_dir}. Supported extensions: {patterns}")
+            searched = ', '.join(image_dirs)
+            raise FileNotFoundError(f"No images found in {searched}. Supported extensions: {patterns}")
 
         rgbinfo_dict = {}
-        rgbinfo_dict['timestamp'] = list(range(len(rgb_files)))    # (N, ), list
+        rgbinfo_dict['timestamp'] = [self._timestamp_from_filename(path, idx) for idx, path in enumerate(rgb_files)]
         rgbinfo_dict['filepath']  = rgb_files # (N, ), list
+        rgbinfo_dict['image_name'] = [os.path.basename(path) for path in rgb_files]
+        rgbinfo_dict['image_stem'] = [os.path.splitext(os.path.basename(path))[0] for path in rgb_files]
+        rgbinfo_dict['frame_id'] = [self._frame_id_from_filename(path) for path in rgb_files]
         self.rgbinfo_dict = rgbinfo_dict
+        self._timestamp_array = np.asarray(rgbinfo_dict['timestamp'], dtype=np.float64)
     
     
     
@@ -84,6 +129,10 @@ class CustomDataset:
         data_packet['timestamp'] = self.rgbinfo_dict['timestamp'][idx] # float 
         data_packet['rgb']       = rgb                                 # (1, 3, H, W)
         data_packet['intrinsic'] = intrinsic                           # (4, )
+        data_packet['frame_index'] = idx
+        data_packet['frame_id'] = self.rgbinfo_dict['frame_id'][idx]
+        data_packet['image_name'] = self.rgbinfo_dict['image_name'][idx]
+        data_packet['image_path'] = self.rgbinfo_dict['filepath'][idx]
         self.tqdm.update(1)
         return data_packet
     

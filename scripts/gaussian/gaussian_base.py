@@ -48,6 +48,7 @@ class GaussianBase:
                               'inv_opacity': inverse_sigmoid}
 
         self.initialized_state = False
+        self.saved_output_frames = set()
     
     def setup_optimizer(self):
         cfg = self.cfg
@@ -340,6 +341,84 @@ class GaussianBase:
         '''
         self._xyz, self._rgb, self._opacity, self._scaling, self._rotation = new_dict['_xyz'], new_dict['_rgb'], new_dict['_opacity'], new_dict['_scaling'], new_dict['_rotation']
     
+    def _batch_item(self, batch, key, idx, default=None):
+        if key not in batch:
+            return default
+        values = batch[key]
+        if torch.is_tensor(values):
+            value = values[idx]
+            if value.ndim == 0:
+                return value.detach().cpu().item()
+            return value
+        try:
+            return values[idx]
+        except TypeError:
+            return values
+
+    def _keyframe_save_key(self, batch, idx):
+        image_stem = self._batch_item(batch, 'image_stems', idx)
+        if image_stem is not None:
+            return str(image_stem)
+        return str(self._batch_item(batch, 'viz_out_idx_to_f_idx', idx, idx))
+
+    def _keyframe_meta(self, batch, idx):
+        timestamp = self._batch_item(batch, 'matched_timestamps', idx)
+        if timestamp is None:
+            timestamp = self._batch_item(batch, 'viz_out_idx_to_f_idx', idx)
+        return {
+            'frame_index': self._batch_item(batch, 'frame_indices', idx),
+            'frame_id': self._batch_item(batch, 'frame_ids', idx),
+            'image_name': self._batch_item(batch, 'image_names', idx),
+            'image_stem': self._batch_item(batch, 'image_stems', idx),
+            'image_path': self._batch_item(batch, 'image_paths', idx),
+            'render_name': self._batch_item(batch, 'render_names', idx),
+            'pose_name': self._batch_item(batch, 'pose_names', idx),
+            'matched_timestamp': timestamp,
+        }
+
+    def save_keyframe_outputs(self, batch):
+        poses = batch['poses']
+        images = batch['images']
+        depths = batch['depths']
+        depths_cov = batch['depths_cov']
+        intrinsic_dict = batch['intrinsic']
+
+        for kf_idx in range(poses.shape[0]):
+            save_key = self._keyframe_save_key(batch, kf_idx)
+            if save_key in self.saved_output_frames:
+                continue
+
+            c2w = poses[kf_idx]
+            w2c = torch.linalg.inv(c2w)
+            next_idx = min(kf_idx + 1, poses.shape[0] - 1)
+            with torch.no_grad():
+                pred_dict = self.render(
+                    w2c,
+                    intrinsic_dict,
+                    None,
+                    w2c2=torch.linalg.inv(poses[next_idx]),
+                )
+                gt_dict = {
+                    'rgb': images[kf_idx].permute(2, 0, 1),
+                    'depth': depths[kf_idx].permute(2, 0, 1),
+                    'uncert': depths_cov[kf_idx].permute(2, 0, 1),
+                    'depth_cov': depths_cov[kf_idx].permute(2, 0, 1),
+                    'c2w': c2w,
+                    'pose': c2w,
+                    'abs_frame_idx_list': batch['viz_out_idx_to_f_idx'],
+                    'frame_meta': self._keyframe_meta(batch, kf_idx),
+                }
+
+                if self.cfg['use_sky'] and 'sky_images' in batch:
+                    gt_dict['sky_rgb'] = batch['sky_images'][kf_idx].permute(2, 0, 1)
+                    pred_dict_sky = self.sky_model.render(w2c, intrinsic_dict)
+                    pred_dict['rgb'] = self.sky_model.fuse_rgb(pred_dict, pred_dict_sky)
+
+                frame_id = batch['viz_out_idx_to_f_idx'][kf_idx]
+                vis_rgbdnua(self.cfg, frame_id, pred_dict, gt_dict)
+
+            self.saved_output_frames.add(save_key)
+
     def train_once_gaussian(self, batch, train_iters):
         # Get data from batch.
         # abs_frame_idx_list = batch["viz_out_idx_to_f_idx"]    # (N, 1)
@@ -412,14 +491,6 @@ class GaussianBase:
 
             # TTD 2024/12/29 dangerous option.
             if True and curr_iter == train_iters - 1:
-                gt_dict['pose'] = c2w
-                gt_dict['abs_frame_idx_list'] = batch["viz_out_idx_to_f_idx"]
-                frame_id = batch["viz_out_idx_to_f_idx"][curr_id]
-                if 'use_mobile' in self.cfg.keys() and self.cfg['use_mobile']:
-                    self.vis_rgbdnua = vis_rgbdnua(self.cfg, frame_id, pred_dict, gt_dict, True)
-                else:
-                    vis_rgbdnua(self.cfg, frame_id, pred_dict, gt_dict)
-                    
                 self.wandber.log_once("num_of_gaussians", self._xyz.shape[0])
                 self.wandber.log_once("psnr", calc_psnr(pred_dict['rgb'], gt_dict['rgb'], gt_dict['depth'].squeeze(0)>0).item())
             
@@ -431,6 +502,7 @@ class GaussianBase:
             
             self.wandber.log_time('adcs_time')
             
+        self.save_keyframe_outputs(batch)
         self.time_idx += 1
     
     

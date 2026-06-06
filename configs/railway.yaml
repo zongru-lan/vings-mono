@@ -12,7 +12,7 @@ device:
   mapper: 'cuda:0'
 
 dataset:
-  root: /home/leizongru/lzr_ws/VINGS-Mono/rail_dataset/scene_14_train/
+  root: /home/leizongru/lzr_ws/railway_data/scene_14_train/
   module: datasets.custom
   rgb_strip: 1
 
@@ -23,6 +23,10 @@ middleware:
 
 output:
   save_dir: /home/leizongru/lzr_ws/VINGS-Mono/output/
+  save_rgbdnua: False
+  save_legacy_outputs: False
+  render_height: 2504
+  render_width: 4112
 
 # rgb_12mp_middle calibration from /home/leizongru/lzr_ws/intrinsics_rgb_12mp_middle.json.
 # Source OpenCV distortion coefficients [k1, k2, p1, p2, k3]:

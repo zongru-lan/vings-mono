@@ -12,7 +12,7 @@ parser.add_argument("config")
 parser.add_argument("--prefix", default='')
 args = parser.parse_args()
 config_path = args.config
-from gaussian.general_utils import load_config, get_name
+from gaussian.general_utils import load_config
 config = load_config(config_path)
 import importlib
 get_dataset = importlib.import_module(config["dataset"]["module"]).get_dataset
@@ -23,6 +23,45 @@ from metric.metric_model import Metric_Model
 import time
 from tqdm import tqdm
 if config['mode'] == 'vo_nerfslam': from frontend_vo.vio_slam import VioSLAM
+
+
+def get_sequence_name(cfg, prefix):
+    if prefix:
+        sequence_name = os.path.basename(os.path.normpath(prefix))
+    else:
+        sequence_name = os.path.basename(os.path.normpath(cfg['dataset']['root']))
+    if not sequence_name:
+        raise ValueError('Cannot infer output sequence name from dataset.root or --prefix.')
+    return sequence_name
+
+
+def prepare_output_dir(cfg, sequence_name):
+    base_dir = os.path.abspath(cfg['output']['save_dir'])
+    save_dir = os.path.abspath(os.path.join(base_dir, sequence_name))
+    if not save_dir.startswith(base_dir + os.sep):
+        raise ValueError(f'Unsafe output directory: {save_dir}')
+
+    if os.path.exists(save_dir):
+        shutil.rmtree(save_dir)
+
+    cfg['output']['sequence_name'] = sequence_name
+    cfg['output']['save_dir'] = save_dir
+    os.makedirs(os.path.join(save_dir, 'renders'), exist_ok=True)
+    os.makedirs(os.path.join(save_dir, 'poses'), exist_ok=True)
+    os.makedirs(os.path.join(save_dir, 'ply'), exist_ok=True)
+
+    if cfg['output'].get('save_rgbdnua', True):
+        os.makedirs(os.path.join(save_dir, 'rgbdnua'), exist_ok=True)
+    if cfg['output'].get('save_legacy_outputs', True):
+        os.makedirs(os.path.join(save_dir, 'droid_c2w'), exist_ok=True)
+    if 'debug_mode' in list(cfg.keys()) and cfg['debug_mode']:
+        os.makedirs(os.path.join(save_dir, 'debug_dict'), exist_ok=True)
+
+
+def attach_frame_metadata(viz_out, dataset):
+    if hasattr(dataset, 'get_frame_metadata_by_timestamps'):
+        viz_out.update(dataset.get_frame_metadata_by_timestamps(viz_out['viz_out_idx_to_f_idx']))
+    return viz_out
 
 
 class Runner:
@@ -84,6 +123,8 @@ class Runner:
             torch.cuda.empty_cache()
             # Judge whether new keyframe is added and package keyframe dict.
             viz_out = judge_and_package(self.tracker, data_packet['intrinsic'])
+            if viz_out is not None:
+                viz_out = attach_frame_metadata(viz_out, self.dataset)
             
             if viz_out is not None and (self.cfg['mode'] in ['vo', 'vo_nerfslam'] or self.tracker.video.imu_enabled):
                 # Save and check.
@@ -113,13 +154,9 @@ class Runner:
 
 if __name__ == '__main__':
     
-    config['output']['save_dir'] = os.path.join(config['output']['save_dir'], get_name(config)+'-{}-'.format(config_path.split('/')[-1].strip('.yaml'))+args.prefix)
-    os.makedirs(config['output']['save_dir']+'/droid_c2w', exist_ok=True)
-    os.makedirs(config['output']['save_dir']+'/rgbdnua', exist_ok=True)
-    os.makedirs(config['output']['save_dir']+'/ply', exist_ok=True)
-    if 'debug_mode' in list(config.keys()) and config['debug_mode']:
-        os.makedirs(config['output']['save_dir']+'/debug_dict', exist_ok=True)
-    shutil.copy(config_path, config['output']['save_dir']+'/config.yaml')
+    sequence_name = get_sequence_name(config, args.prefix)
+    prepare_output_dir(config, sequence_name)
+    shutil.copy(config_path, os.path.join(config['output']['save_dir'], 'config.yaml'))
     
     runner = Runner(config)
     torch.backends.cudnn.benchmark = True

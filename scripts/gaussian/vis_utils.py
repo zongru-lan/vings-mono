@@ -1,4 +1,6 @@
+import csv
 import torch
+import torch.nn.functional as F
 from matplotlib import cm
 import matplotlib.pyplot as plt
 import open3d as o3d
@@ -106,9 +108,185 @@ def draw_circles(image, coordinates, radius=5, color=(0, 0, 255)):
     for coord in coordinates:
         cv2.circle(image, tuple(coord), radius, color, thickness=2)
 
+
+POSE_COORDINATE_SYSTEM = (
+    "T_world_camera (c2w): transforms points from camera frame to the "
+    "VINGS internal world/map frame. Camera frame uses +x right, +y down, +z forward. "
+    "The world/map frame is initialized by VINGS and is not a GPS/ENU frame."
+)
+
+
+def _safe_scalar(value):
+    if torch.is_tensor(value):
+        value = value.detach().cpu().reshape(-1)[0].item()
+    if isinstance(value, np.generic):
+        value = value.item()
+    return value
+
+
+def _frame_meta_value(frame_meta, key, fallback=None):
+    value = frame_meta.get(key, fallback)
+    return _safe_scalar(value) if value is not None else fallback
+
+
+def _pose_to_numpy(c2w):
+    if torch.is_tensor(c2w):
+        return c2w.detach().cpu().numpy().astype(np.float64)
+    return np.asarray(c2w, dtype=np.float64)
+
+
+def _rotation_matrix_to_quaternion_xyzw(rotation):
+    r = np.asarray(rotation, dtype=np.float64)
+    trace = np.trace(r)
+    if trace > 0.0:
+        s = np.sqrt(trace + 1.0) * 2.0
+        qw = 0.25 * s
+        qx = (r[2, 1] - r[1, 2]) / s
+        qy = (r[0, 2] - r[2, 0]) / s
+        qz = (r[1, 0] - r[0, 1]) / s
+    elif r[0, 0] > r[1, 1] and r[0, 0] > r[2, 2]:
+        s = np.sqrt(1.0 + r[0, 0] - r[1, 1] - r[2, 2]) * 2.0
+        qw = (r[2, 1] - r[1, 2]) / s
+        qx = 0.25 * s
+        qy = (r[0, 1] + r[1, 0]) / s
+        qz = (r[0, 2] + r[2, 0]) / s
+    elif r[1, 1] > r[2, 2]:
+        s = np.sqrt(1.0 + r[1, 1] - r[0, 0] - r[2, 2]) * 2.0
+        qw = (r[0, 2] - r[2, 0]) / s
+        qx = (r[0, 1] + r[1, 0]) / s
+        qy = 0.25 * s
+        qz = (r[1, 2] + r[2, 1]) / s
+    else:
+        s = np.sqrt(1.0 + r[2, 2] - r[0, 0] - r[1, 1]) * 2.0
+        qw = (r[1, 0] - r[0, 1]) / s
+        qx = (r[0, 2] + r[2, 0]) / s
+        qy = (r[1, 2] + r[2, 1]) / s
+        qz = 0.25 * s
+
+    quat = np.array([qx, qy, qz, qw], dtype=np.float64)
+    norm = np.linalg.norm(quat)
+    if norm > 0.0:
+        quat /= norm
+    return quat
+
+
+def _write_pose_readme(pose_dir):
+    readme_path = os.path.join(pose_dir, 'README.md')
+    if os.path.exists(readme_path):
+        return
+    content = """# Estimated keyframe poses
+
+This directory stores estimated keyframe poses from VINGS-Mono.
+
+Files:
+- `estimated_c2w.csv`: one row per saved keyframe, including GT frame index/id/name/timestamp, render name, translation, quaternion, and the 4x4 matrix.
+- `estimated_c2w_tum.txt`: TUM-style trajectory rows, `gt_timestamp tx ty tz qx qy qz qw`.
+- `<gt_frame_id>.txt`: the 4x4 pose matrix for one keyframe.
+
+Coordinate system:
+- Pose convention: `T_world_camera` / `c2w`.
+- The matrix transforms homogeneous points from the camera frame to the VINGS internal world/map frame.
+- Camera frame: +x right, +y down, +z forward.
+- World/map frame: initialized by VINGS-Mono during VO; it is not GPS, ENU, or latitude/longitude.
+
+Render images are saved in `../renders/` with the same `frame_id` stem.
+"""
+    with open(readme_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+
+def _save_keyframe_render(cfg, pred_rgb_chw, frame_meta, frame_id):
+    render_dir = os.path.join(cfg['output']['save_dir'], 'renders')
+    os.makedirs(render_dir, exist_ok=True)
+
+    fallback_name = f"FrameId={str(_safe_scalar(frame_id)).zfill(5)}.png"
+    render_name = os.path.basename(str(_frame_meta_value(frame_meta, 'render_name', fallback_name)))
+    render_path = os.path.join(render_dir, render_name)
+
+    output_cfg = cfg.get('output', {})
+    target_h = int(output_cfg.get('render_height', cfg['intrinsic']['H']))
+    target_w = int(output_cfg.get('render_width', cfg['intrinsic']['W']))
+
+    image = torch.clamp(pred_rgb_chw.detach(), 0.0, 1.0)
+    if image.shape[-2:] != (target_h, target_w):
+        image = F.interpolate(
+            image.unsqueeze(0),
+            size=(target_h, target_w),
+            mode='bilinear',
+            align_corners=False,
+        ).squeeze(0)
+    torchvision.utils.save_image(image, render_path)
+    return render_name
+
+
+def _save_keyframe_pose(cfg, c2w, frame_meta, frame_id, render_name):
+    pose_dir = os.path.join(cfg['output']['save_dir'], 'poses')
+    os.makedirs(pose_dir, exist_ok=True)
+    _write_pose_readme(pose_dir)
+
+    fallback_name = f"FrameId={str(_safe_scalar(frame_id)).zfill(5)}.txt"
+    pose_name = os.path.basename(str(_frame_meta_value(frame_meta, 'pose_name', fallback_name)))
+    pose_path = os.path.join(pose_dir, pose_name)
+
+    c2w_np = _pose_to_numpy(c2w)
+    np.savetxt(pose_path, c2w_np, fmt='%.10f')
+
+    gt_timestamp = _frame_meta_value(frame_meta, 'matched_timestamp', _safe_scalar(frame_id))
+    gt_frame_index = _frame_meta_value(frame_meta, 'frame_index', '')
+    gt_frame_id = str(_frame_meta_value(frame_meta, 'frame_id', os.path.splitext(pose_name)[0]))
+    gt_image_name = str(_frame_meta_value(frame_meta, 'image_name', ''))
+    gt_image_path = str(_frame_meta_value(frame_meta, 'image_path', ''))
+
+    translation = c2w_np[:3, 3]
+    qx, qy, qz, qw = _rotation_matrix_to_quaternion_xyzw(c2w_np[:3, :3])
+    matrix_values = c2w_np.reshape(-1).tolist()
+
+    csv_path = os.path.join(pose_dir, 'estimated_c2w.csv')
+    write_header = not os.path.exists(csv_path)
+    matrix_header = [f'm{r}{c}' for r in range(4) for c in range(4)]
+    with open(csv_path, 'a', newline='', encoding='utf-8') as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow([
+                'gt_frame_index', 'gt_frame_id', 'gt_image_name', 'gt_image_path',
+                'render_name', 'pose_file', 'gt_timestamp', 'coordinate_system',
+                'tx', 'ty', 'tz', 'qx', 'qy', 'qz', 'qw',
+                *matrix_header,
+            ])
+        writer.writerow([
+            gt_frame_index, gt_frame_id, gt_image_name, gt_image_path,
+            render_name, pose_name, gt_timestamp, POSE_COORDINATE_SYSTEM,
+            *[f'{x:.10f}' for x in translation],
+            f'{qx:.10f}', f'{qy:.10f}', f'{qz:.10f}', f'{qw:.10f}',
+            *[f'{x:.10f}' for x in matrix_values],
+        ])
+
+    try:
+        timestamp_float = float(gt_timestamp)
+    except (TypeError, ValueError):
+        timestamp_float = None
+    if timestamp_float is not None:
+        tum_path = os.path.join(pose_dir, 'estimated_c2w_tum.txt')
+        with open(tum_path, 'a', encoding='utf-8') as f:
+            f.write(
+                f'{timestamp_float:.9f} {translation[0]:.10f} {translation[1]:.10f} {translation[2]:.10f} '
+                f'{qx:.10f} {qy:.10f} {qz:.10f} {qw:.10f}\n'
+            )
+
+
+def _save_keyframe_outputs(cfg, frame_id, pred_rgb_chw, c2w, frame_meta):
+    render_name = _save_keyframe_render(cfg, pred_rgb_chw, frame_meta, frame_id)
+    _save_keyframe_pose(cfg, c2w, frame_meta, frame_id, render_name)
+
+
 def vis_rgbdnua(cfg, frame_id, pred_dict, gt_dict, return_image=False):
 
-    pred_rgb      = pred_dict['rgb'].permute(1, 2, 0)
+    pred_rgb_chw  = pred_dict['rgb']
+    frame_meta    = gt_dict.get('frame_meta', {})
+    if 'pose' in gt_dict:
+        _save_keyframe_outputs(cfg, frame_id, pred_rgb_chw, gt_dict['pose'], frame_meta)
+
+    pred_rgb      = pred_rgb_chw.permute(1, 2, 0)
     gt_rgb        = gt_dict['rgb'].permute(1, 2, 0)
     pred_depth    = pred_dict['depth'].permute(1, 2, 0)
     gt_depth      = gt_dict['depth'].permute(1, 2, 0)
@@ -139,11 +317,14 @@ def vis_rgbdnua(cfg, frame_id, pred_dict, gt_dict, return_image=False):
     image_to_show = image_to_show.permute(2, 0, 1) # (H, W, C)
     # image_to_show = torch.clamp(image_to_show, 0, 1)
 
-    torchvision.utils.save_image(image_to_show, f"{cfg['output']['save_dir']}/rgbdnua/FrameId={str(frame_id.item()).zfill(5)}.png")
+    save_rgbdnua = cfg.get('output', {}).get('save_rgbdnua', True)
+    if save_rgbdnua:
+        os.makedirs(os.path.join(cfg['output']['save_dir'], 'rgbdnua'), exist_ok=True)
+        torchvision.utils.save_image(image_to_show, f"{cfg['output']['save_dir']}/rgbdnua/FrameId={str(_safe_scalar(frame_id)).zfill(5)}.png")
     
     
     # TTD 2024/10/09
-    if "optical_flow" in list(pred_dict.keys()):
+    if save_rgbdnua and "optical_flow" in list(pred_dict.keys()):
         pass
         # with torch.no_grad():
         #    flow_rgb = flow_to_image(pred_dict["optical_flow"].detach().cpu())
@@ -152,7 +333,7 @@ def vis_rgbdnua(cfg, frame_id, pred_dict, gt_dict, return_image=False):
     
     
     # Draw query uv.
-    if 'use_dynamic' in list(cfg.keys()) and cfg['use_dynamic']:
+    if save_rgbdnua and 'use_dynamic' in list(cfg.keys()) and cfg['use_dynamic']:
         query_uv = get_query_uv(gt_dict['uncert'].permute(1, 2, 0), gt_depth).cpu().numpy() # (N, 2)
         img = cv2.imread(f"{cfg['output']['save_dir']}/rgbdnua/FrameId={str(frame_id.item()).zfill(5)}.png")
         np.savetxt(f"{cfg['output']['save_dir']}/rgbdnua/FrameId={str(frame_id.item()).zfill(5)}.txt", query_uv)
@@ -160,12 +341,12 @@ def vis_rgbdnua(cfg, frame_id, pred_dict, gt_dict, return_image=False):
         draw_circles(img, query_uv[:, ::-1])
         cv2.imwrite(f"{cfg['output']['save_dir']}/rgbdnua/FrameId={str(frame_id.item()).zfill(5)}.png", img)
 
-    c2w = gt_dict['pose']
-    np.savetxt(f"{cfg['output']['save_dir']}/droid_c2w/{str(frame_id.item()).zfill(8)}.txt", c2w.cpu().numpy())
-    
-    
-    with open(cfg['output']['save_dir']+'/keyframelist.txt', 'a') as f:
-        f.write(f"{gt_dict['abs_frame_idx_list']}\n")
+    if cfg.get('output', {}).get('save_legacy_outputs', True):
+        os.makedirs(os.path.join(cfg['output']['save_dir'], 'droid_c2w'), exist_ok=True)
+        c2w = gt_dict['pose']
+        np.savetxt(f"{cfg['output']['save_dir']}/droid_c2w/{str(_safe_scalar(frame_id)).zfill(8)}.txt", c2w.cpu().numpy())
+        with open(cfg['output']['save_dir']+'/keyframelist.txt', 'a') as f:
+            f.write(f"{gt_dict['abs_frame_idx_list']}\n")
     
     if 'debug_mode' in list(cfg.keys()) and cfg['debug_mode']:
         # Save RGBD, c2w together.
@@ -175,7 +356,7 @@ def vis_rgbdnua(cfg, frame_id, pred_dict, gt_dict, return_image=False):
         debug_dict['gt_depth'] = gt_dict['depth'].cpu() # (1, H, W)
         debug_dict['pred_rgb']   = pred_rgb.cpu() # (3, H, W)
         debug_dict['pred_depth'] = pred_depth.cpu() # (1, H, W)
-        torch.save(debug_dict, f"{cfg['output']['save_dir']}/debug_dict/{str(frame_id.item()).zfill(5)}.pt")
+        torch.save(debug_dict, f"{cfg['output']['save_dir']}/debug_dict/FrameId={str(_safe_scalar(frame_id)).zfill(5)}.pt")
 
     # TTD 2024/10/25
     if return_image:

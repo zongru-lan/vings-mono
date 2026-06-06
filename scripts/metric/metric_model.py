@@ -27,13 +27,15 @@ class Metric_Model:
         ckpt_path = 'ckpts/metric_depth_vit_small_800k.pth'
         # self.predictor = Metric(checkpoint='/data/wuke/workspace/droid_metric/weights/metric_depth_vit_small_800k.pth', model_name='v2-S')
         self.predictor = Metric(checkpoint=ckpt_path, model_name='v2-S')
-        if u_scale is None:
-            # u_scale, v_scale = self.cfg['frontend']['image_size'][0]/self.cfg['intrinsic']['H'], self.cfg['frontend']['image_size'][1]/self.cfg['intrinsic']['W']
-            u_scale, v_scale = 1.0, 1.0
-            # self.intr  = np.array([cfg['intrinsic']['fv'], cfg['intrinsic']['fu'], cfg['intrinsic']['cv'], cfg['intrinsic']['cu']])
-            self.intr  = np.array([cfg['intrinsic']['fv']*v_scale, cfg['intrinsic']['fu']*u_scale, cfg['intrinsic']['cv']*v_scale, cfg['intrinsic']['cu']*u_scale])
-        else:
-            self.intr  = np.array([cfg['intrinsic']['fv']*v_scale, cfg['intrinsic']['fu']*u_scale, cfg['intrinsic']['cv']*v_scale, cfg['intrinsic']['cu']*u_scale])
+        if u_scale is None or v_scale is None:
+            u_scale = self.cfg['frontend']['image_size'][0] / self.cfg['intrinsic']['H']
+            v_scale = self.cfg['frontend']['image_size'][1] / self.cfg['intrinsic']['W']
+        self.intr = np.array([
+            cfg['intrinsic']['fv'] * v_scale,
+            cfg['intrinsic']['fu'] * u_scale,
+            cfg['intrinsic']['cv'] * v_scale,
+            cfg['intrinsic']['cu'] * u_scale,
+        ])
         self.d_max = 300.0
     
     def predict(self, img):
