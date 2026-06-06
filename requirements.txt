@@ -22,14 +22,14 @@ HTML4Vision==0.4.3
 timm==0.6.7
 imgaug
 iopath
-mmcv==1.7.2
+# mmcv==1.7.2
 mmengine==0.10.5
 triton==2.0.0
 wandb
-submodules/diff-surfel-rasterization
+# submodules/diff-surfel-rasterization
 # LightGlue
 kornia==0.7.3
 kornia-moons==0.2.9
 onnx==1.16.1
-onnxruntime-gpu==1.18.1
+# onnxruntime-gpu==1.18.1
 psutil
