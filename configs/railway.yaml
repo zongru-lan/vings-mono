@@ -24,16 +24,18 @@ middleware:
 output:
   save_dir: /home/leizongru/lzr_ws/VINGS-Mono/output/
 
-# Railway sample images are 4112x2504.
-# TODO: replace these temporary scaled values with the real railway camera calibration.
+# rgb_12mp_middle calibration from /home/leizongru/lzr_ws/intrinsics_rgb_12mp_middle.json.
+# Source OpenCV distortion coefficients [k1, k2, p1, p2, k3]:
+# [-0.0790171, -0.17716, 0.0, 0.0, 1.7629]
+# VINGS-Mono does not undistort images in datasets.custom; use undistorted images or add preprocessing.
 intrinsic:
   H: 2504
   W: 4112
   # VINGS configs use fu/fv/cu/cv as fy/fx/cy/cx respectively.
-  fu: 4657.272962
-  fv: 4297.928578
-  cu: 1647.565759
-  cv: 2314.938011
+  fu: 7267.95450880415
+  fv: 7267.95450880415
+  cu: 1232.862908875167
+  cv: 2056.049238502414
   resolution_scale: 1.0
   bg: 0
 
